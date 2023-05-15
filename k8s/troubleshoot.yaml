@@ -1,0 +1,197 @@
+ 
+global:
+  application: lshop-detail-service
+  version: ${trigger.parameters.version}
+  portMappings:
+    - name: http
+      port: 8080
+      pathPrefixes:
+        - /
+
+datadog:
+  openmetrics:
+    - port: 8080
+      endpoint: /actuator/prometheus
+      metricsToFetch:
+        - "http_server_requests_seconds"
+        - "http_client_requests_seconds"
+        - "logback_events_total"
+        - "events_total"
+        - "jvm_threads_states_threads"
+        - "lshop_detail_service_connector_error_total"
+        - "tomcat_threads_busy_threads"
+        - "tomcat_threads_config_max_threads"
+        - "tomcat_global_error_total"
+        - "tomcat_servlet_error_total"
+        - "jvm_buffer_memory_used_bytes"
+        - "executor_active_threads"
+        - "executor_queued_tasks"
+        - "executor_pool_size_threads"
+        - "grpc_client_requests_seconds"
+        - "lsds_ols_member_rewards_latency_seconds_max"
+        - "lsds_ols_member_rewards_latency_seconds_sum"
+        - "lsds_ols_member_rewards_latency_seconds_count"
+  metadata:
+    inject: true
+
+vault:
+  secrets:
+    enabled: true
+
+deployment:
+  replicas:
+    min: 60
+    max: 350
+  env:
+    - name: APP_NAME
+      value: lshop-detail-service
+    - name: JAVA_JVM_ARGS
+      value: >-
+        -server
+        -Dfile.encoding=UTF-8
+        -Xmx1024m
+        -Xms1024m
+        -Djava.security.egd=file:/dev/./urandom
+        -Djdk.xml.entityExpansionLimit=0
+        -Djdk.xml.elementAttributeLimit=0
+        -Djdk.xml.maxOccur=0
+        -Djdk.xml.totalEntitySizeLimit=0
+        -Dapplication.name=lshop-detail-service
+        -Dapplication.environment=prod
+        -Dapplication.home=${"${APP_HOME}"}
+        -javaagent:/datadog/dd-java-agent.jar
+    - name: DD_TRACE_HEADER_TAGS
+      value: >-
+        Client-Token:request_headers.Client-Token,
+        Message-Id:request_headers.Message-ID,
+        Session-Guid:request_headers.Session-Guid,
+        User-Id:request_headers.User-Id,
+        tuid:request_headers.tuid,
+        guid:request_headers.guid,
+        ip:request_headers.ip,
+        pageName:request_headers.pageName,
+        deviceType:request_headers.deviceType,
+        userAgent:request_headers.userAgent,
+        Debug-Trace:request_headers.Debug-Trace,
+        Trace-ID:request_headers.Trace-ID,
+        Session-Guid:request_headers.Session-Guid,
+        authState:request_headers.authState
+    - name: EG_VAULT_ENABLED
+      value: "true"
+{{ if eq .cluster.region "us-west-2" }}
+    - name: SPRING_PROFILES_ACTIVE
+      value: "prod,prod-lodgingdemand,prod-us-west-2-lodgingdemand"
+{{ else }}
+    - name: SPRING_PROFILES_ACTIVE
+      value: "prod,prod-lodgingdemand,prod-us-east-1-lodgingdemand"
+{{ end }}
+
+
+  resources:
+    requests:
+      memory: "1536Mi"
+      cpu: "1000m"
+    limits:
+      memory: "2560Mi"
+      cpu: "4000m"
+  autoscale:
+    metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 30
+  istio:
+    proxy:
+      config:
+        terminationDrainDuration: 40s
+  affinity:
+    ### Set the app to prefer not to run on the same node next to its peers. If no space is available it will land on the same node.
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: lshop-detail-service
+            topologyKey: kubernetes.io/hostname
+          weight: 100
+
+management:
+  livenessProbe:
+    httpGet: &health_check
+      path: /actuator/info
+      port: 8080
+    initialDelaySeconds: 20
+    timeoutSeconds: 2
+    periodSeconds: 7
+    failureThreshold: 10
+  readinessProbe:
+    httpGet: *health_check
+    initialDelaySeconds: 20
+    timeoutSeconds: 2
+    periodSeconds: 5
+    failureThreshold: 7
+
+paved-road-aws:
+  enabled: true
+  iam:
+    enabled: true
+    policies:
+      - effect: Allow
+        actions:
+          - "s3:GetObject"
+          - "s3:ListBucket"
+        resources:
+          - "arn:aws:s3:::bexplatform-config-central-prod"
+          - "arn:aws:s3:::bexplatform-config-central-prod/*"
+          - "arn:aws:s3:::platform-experiment"
+          - "arn:aws:s3:::platform-experiment/*"
+          - "arn:aws:s3:::platform-analytics-prime"
+          - "arn:aws:s3:::platform-analytics-prime/*"
+          - "arn:aws:s3:::dist-config-yoda-filestore-prod-us-west-2"
+          - "arn:aws:s3:::dist-config-yoda-filestore-prod-us-west-2/*"
+
+paved-road-warmup:
+  enabled: true
+  concurrency: 5
+  maxDurationSeconds: 80
+  targetReadinessProtocol: "http"
+  targetReadinessPath: /actuator/info
+  requestDelayMilliseconds: 1000
+  httpHeaders:
+    - key: "User-Agent"
+      value: "Mittens"
+    - key: "Accept"
+      value: "application/json"
+    - key: "Content-Type"
+      value: "application/json"
+    - key: "Client-Token"
+      value: "Mittens"
+    - key: "Exp-User-Id"
+      value: "-1"
+  requests:
+    - type: "http"
+      method: "GET"
+      url: "v1/property-metadata/{$random|1,80001,70201}/{$random|1234,20230,11274,546934,43629,25246,58899819}"
+    - type: "http"
+      method: "GET"
+      url: "v1/rate-calendar/hotel/{$random|1,80001,70201}/{$random|1234,20230,11274,546934,43629,25246,58899819}/2/{$currentDate|days+5,format=yyyy-MM-dd}/{$currentDate|days+7,format=yyyy-MM-dd}"
+    - type: "http"
+      method: "GET"
+      url: "v2/dateless-detailed-offers/{$random|1,80001,70201}/en_US/{$random|1234,20230,11274,546934,43629,25246,58899819}"
+    - type: "http"
+      method: "GET"
+      url: "v3/detailed-offers/{$random|1,80001,70201}/en_US/{$random|1234,20230,11274,546934,43629,25246,58899819}/2/{$currentDate|days+5,format=yyyy-MM-dd}/{$currentDate|days+7,format=yyyy-MM-dd}"
+Expedia Inc.
+Expedia Inc.
+Expedia Inc.
+© 2022 GitHub, Inc.
+Help
+Support
+API
+Training
+Blog
+About
+GitHub Enterprise Server 3.4.4
+Loading complete

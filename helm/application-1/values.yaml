@@ -1,0 +1,20 @@
+# Default values for application-1.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+deployment:
+  name: my-deployment
+  replicaCount: 1
+  image:
+    name: nginx
+    version: latest
+
+service:
+  name: my-service
+  type: NodePort
+  port: 80
+  targetPort: 80
+  nodePort: 32036
+
+newcontainer:
+  enabled: false
