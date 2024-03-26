@@ -1,0 +1,10 @@
+---
+-name: Create Vagrant VM
+hosts: all
+become: yes
+tasks:
+  - name: Ensure ntp is installed
+    yum: name=ntpd state=present
+
+  - name: Ensure ntp is running
+    service: name=ntpd state=started enabled=yes 
